@@ -237,6 +237,45 @@ describe("WebSocket real-time notification delivery", () => {
     ws2.close();
   });
 
+  test("replays notifications missed during disconnect exactly once and in order", async () => {
+    const ws1 = wsConnect(TEST_USER_2);
+    await waitForOpen(ws1);
+    await ws1._waitForMessage((m) => m.event === "connected", 1000);
+
+    const closed = new Promise((resolve) => ws1.once("close", resolve));
+    ws1.close();
+    await closed;
+
+    await createInAppNotification({
+      userAddress: TEST_USER_2,
+      type: "new_message",
+      title: "First while offline",
+      body: "first",
+    });
+    await createInAppNotification({
+      userAddress: TEST_USER_2,
+      type: "new_message",
+      title: "Second while offline",
+      body: "second",
+    });
+
+    const ws2 = wsConnect(TEST_USER_2);
+    await waitForOpen(ws2);
+    await ws2._waitForMessage(
+      (m) => m.event === "notification:created" && m.payload.title === "Second while offline",
+      1000,
+    );
+
+    const replayed = ws2._messages
+      .filter((m) => m.event === "notification:created")
+      .map((m) => m.payload.title);
+    expect(replayed).toEqual(["First while offline", "Second while offline"]);
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(ws2._messages.filter((m) => m.event === "notification:created")).toHaveLength(2);
+    ws2.close();
+  });
+
   // ───────────────────────────────────────────────────────────────────────────
   // Acceptance criterion 3
   // ───────────────────────────────────────────────────────────────────────────
